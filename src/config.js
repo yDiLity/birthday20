@@ -51,6 +51,11 @@ export const config = {
   redisPrefix: String(process.env.REDIS_PREFIX ?? "bdq").trim() || "bdq",
 };
 
+/** Настроен ли Upstash Redis. Без него всё живёт в памяти процесса и слетает при холодном старте. */
+export function hasRedis() {
+  return Boolean(config.redisUrl && config.redisToken);
+}
+
 export function isAdmin(userId) {
   return config.adminIds.includes(Number(userId));
 }

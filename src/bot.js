@@ -1,5 +1,5 @@
 import { Telegraf, Markup } from "telegraf";
-import { config, isAdmin, isHero, validate } from "./config.js";
+import { config, isAdmin, isHero, validate, hasRedis } from "./config.js";
 import {
   content,
   questions,
@@ -142,6 +142,12 @@ async function ensureContent() {
 async function persistSetting(key, value) {
   runtimeSettings = { ...runtimeSettings, [key]: value, updatedAt: Date.now() };
   await saveSettings(runtimeSettings);
+}
+
+function memoryOnlyWarning() {
+  return hasRedis()
+    ? ""
+    : "\n\n⚠️ Redis не настроен: правка держится только в памяти и слетит при перезапуске Vercel. Чтобы сохранить её навсегда — настрой Upstash или отредактируй content/questions.json и задеплой.";
 }
 
 async function persistOverride(key, value) {
@@ -554,7 +560,13 @@ async function onAdminName(ctx) {
   }
   const name = raw.replace(/\s+/g, " ").slice(0, 40);
   await persistSetting("heroName", name);
-  await safeReply(ctx, `Готово, именинник — ${name}! Имя сохранено в Redis и сразу подставится в тексты.`);
+  await safeReply(
+    ctx,
+    [
+      `Готово, именинник — ${name}! Имя сразу подставится в тексты.`,
+      hasRedis() ? "Сохранено в Redis." : "⚠️ Redis не настроен — имя может слететь при перезапуске Vercel, задай HERO_NAME в переменных окружения.",
+    ].join("\n\n"),
+  );
 }
 
 async function handleAdminCallback(ctx, data) {
@@ -600,6 +612,15 @@ async function onAdminStatus(ctx) {
     `Правок контента: ${Object.keys(getOverrides()).length}`,
     `Сессий: ${sessions.length}`,
   ];
+
+  if (!redisOk) {
+    lines.push(
+      "",
+      "⚠️ Redis не настроен: всё живу в памяти этой функции.",
+      "Vercel может перезапустить её в любой момент — сессия, правки текстов и имя именинника слетят.",
+      "Поэтому HERO_NAME лучше задать переменной окружения, а правки контента переживут только до redeploy.",
+    );
+  }
 
   if (!sessions.length) {
     lines.push("Пока никто не играл.");
@@ -897,6 +918,7 @@ async function onAdminPendingValue(ctx) {
         "",
         "Новое имя сразу подставится в приветствие и финальный текст.",
         "Уже начатые игры сохранят имя, которое было при запуске.",
+        ...(hasRedis() ? [] : ["⚠️ Redis не настроен — имя может слететь при перезапуске Vercel. Сделай его ещё раз или задай HERO_NAME в переменных окружения."]),
         "",
         `Приветствие сейчас:\n${fill(content.greeting, { name: heroName(), count: totalQuestions })}`,
       ].join("\n"),
@@ -908,7 +930,7 @@ async function onAdminPendingValue(ctx) {
   if (state.kind === "singleton") {
     await persistOverride(state.key, value);
     const target = SINGLETON_FIELDS[state.field];
-    await safeReply(ctx, `Сохранено ✅\n${target?.current() ?? value}`);
+    await safeReply(ctx, `Готово ✅\n${target?.current() ?? value}${memoryOnlyWarning()}`);
     return;
   }
 
@@ -920,13 +942,13 @@ async function onAdminPendingValue(ctx) {
 
   if (state.field === "text") {
     await persistOverride(makeKey("q", question.id, "text"), value);
-    await safeReply(ctx, `Вопрос обновлён ✅\n${findQuestionById(question.id).text}`);
+    await safeReply(ctx, `Вопрос обновлён ✅\n${findQuestionById(question.id).text}${memoryOnlyWarning()}`);
     return;
   }
 
   if (state.field === "video") {
     await persistOverride(makeKey("q", question.id, "video", state.optionKey), value);
-    await safeReply(ctx, `Видео для ${question.id}:${state.optionKey} сохранено ✅\n${value}`);
+    await safeReply(ctx, `Видео для ${question.id}:${state.optionKey} сохранено ✅\n${value}${memoryOnlyWarning()}`);
     return;
   }
 
@@ -941,7 +963,7 @@ async function onAdminPendingValue(ctx) {
     ctx,
     state.field === "label"
       ? `Вариант обновлён ✅\n${state.optionKey}. ${updated.options[index].label}`
-      : `Реакция обновлён ✅\n${state.optionKey}. ${updated.options[index].label} → ${updated.options[index].reaction_text}`,
+      : `Реакция обновлён ✅\n${state.optionKey}. ${updated.options[index].label} → ${updated.options[index].reaction_text}${memoryOnlyWarning()}`,
   );
 }
 

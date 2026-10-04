@@ -296,10 +296,20 @@ expect("бот просит имя именинника", texts().some((m) => m.
 reset();
 await message(ADMIN, "Игорь");
 expect("имя именинника сохранено", texts().some((m) => m.text.includes("Игорь")), texts().map((m) => m.text).join(" | ").slice(0, 200));
+expect(
+  "без Redis бот предупреждает о слете имени",
+  texts().some((m) => m.text.includes("Redis не настроен")),
+  texts().map((m) => m.text).join(" | ").slice(0, 200),
+);
 
 reset();
 await pressAs(ADMIN, "adm:status");
 expect("статус показывает именинника", texts().some((m) => m.text.includes("Именинник: Игорь")), texts().map((m) => m.text).join(" | ").slice(0, 200));
+expect(
+  "статус предупреждает о памяти вместо Redis",
+  texts().some((m) => m.text.includes("Redis не настроен")),
+  texts().map((m) => m.text).join(" | ").slice(0, 200),
+);
 
 reset();
 await pressAs(ADMIN, "adm:preview");

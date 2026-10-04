@@ -172,6 +172,19 @@ export function clearPending(adminId, chatId) {
   return deleteValue(pendingKey(adminId, chatId));
 }
 
+/* ------------------------- настройки из админки -------------------------- */
+
+const settingsKey = "settings";
+
+export async function getSettings() {
+  const value = await getValue(settingsKey);
+  return value && typeof value === "object" ? value : {};
+}
+
+export function saveSettings(settings) {
+  return setValue(settingsKey, settings, 60 * 60 * 24 * 365);
+}
+
 /* ---------------------- персональные тесты и мастер ----------------------- */
 
 const quizKey = (code) => `quiz:${code}`;

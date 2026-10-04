@@ -39,6 +39,8 @@ import {
   getDraft,
   saveDraft,
   clearDraft,
+  getSettings,
+  saveSettings,
   pingRedis,
 } from "./store.js";
 import {
@@ -70,6 +72,13 @@ let botInstance = null;
 let telegramOverride = null;
 let contentLoaded = false;
 
+/* Настройки, которые меняются из админки и лежат в Redis (имя именинника и т.п.). */
+let runtimeSettings = {};
+
+function heroName() {
+  return String(runtimeSettings.heroName ?? "").trim() || config.heroName;
+}
+
 /** Точка подмены Telegram-клиента: используется в e2e-тестах (scripts/e2e.js). */
 export function setTelegramClient(client) {
   telegramOverride = client;
@@ -95,6 +104,7 @@ function createBot() {
   bot.command("admin_list", guard(onAdminList));
   bot.command("admin_export", guard(onAdminExport));
   bot.command("admin_reset_content", guard(onAdminResetContent));
+  bot.command("admin_name", guard(onAdminName));
   bot.command("newtest", guard(onNewTest));
   bot.command("mylist", guard(onMyList));
   bot.command("newtest_save", guard(onDraftSaveCommand));
@@ -113,7 +123,7 @@ export function getBot() {
   return botInstance;
 }
 
-/** Правки контента лежат в Redis; подтягиваем их один раз на инстанс. */
+/** Правки контента и настройки лежат в Redis; подтягиваем их один раз на инстанс. */
 async function ensureContent() {
   if (contentLoaded) return;
   try {
@@ -121,7 +131,17 @@ async function ensureContent() {
   } catch (error) {
     console.error("[bot] не смог загрузить правки контента:", error?.message || error);
   }
+  try {
+    runtimeSettings = await getSettings();
+  } catch (error) {
+    console.error("[bot] не смог загрузить настройки:", error?.message || error);
+  }
   contentLoaded = true;
+}
+
+async function persistSetting(key, value) {
+  runtimeSettings = { ...runtimeSettings, [key]: value, updatedAt: Date.now() };
+  await saveSettings(runtimeSettings);
 }
 
 async function persistOverride(key, value) {
@@ -146,7 +166,7 @@ export function botInfo() {
     tokenConfigured: Boolean(config.botToken),
     admins: config.adminIds,
     heroId: config.heroId,
-    heroName: config.heroName,
+    heroName: heroName(),
     contentQuestions: totalQuestions,
     problems,
   };
@@ -193,7 +213,7 @@ function optionsKeyboard(index) {
 }
 
 function heroNameOf(session) {
-  return session?.heroName || config.heroName;
+  return session?.heroName || heroName();
 }
 
 function newSession(chatId, user) {
@@ -201,7 +221,7 @@ function newSession(chatId, user) {
     chatId,
     userId: user.id,
     userName: [user.first_name, user.last_name].filter(Boolean).join(" "),
-    heroName: config.heroName,
+    heroName: heroName(),
     questionIndex: 0,
     answers: [],
     finished: false,
@@ -217,7 +237,7 @@ async function onStart(ctx) {
   if (!chatId || !ctx.from) return;
 
   if (!isHero(ctx.from.id)) {
-    await safeReply(ctx, `Это игра для именинника — ${config.heroName}. Подождём его! 🎂`);
+    await safeReply(ctx, `Это игра для именинника — ${heroName()}. Подождём его! 🎂`);
     return;
   }
 
@@ -480,6 +500,7 @@ const ADMIN_COMMANDS = [
   "/admin_reset [chat_id] — сбросить сессию (текущий чат по умолчанию)",
   "/admin_preview — весь сценарий текстом в этот чат",
   "/admin_reset_content — откатить все правки текстов к варианту из репозитория",
+  "/admin_name [Имя] — имя именинника (или кнопкой «👤 Имя именинника» в /admin_edit)",
   "/admin_id — твой Telegram ID",
 ];
 
@@ -496,6 +517,7 @@ function editMenuKeyboard() {
     [Markup.button.callback("Реакцию", "ce:qreaction"), Markup.button.callback("Видео", "ce:qvideo")],
     [Markup.button.callback("Приветствие", "ce:greeting"), Markup.button.callback("Финальный текст", "ce:finaltext")],
     [Markup.button.callback("Финальное видео", "ce:finalvideo"), Markup.button.callback("Текст-заглушку", "ce:novideo")],
+    [Markup.button.callback("👤 Имя именинника", "ce:heroname")],
     [Markup.button.callback("Показать сценарий", "ce:list"), Markup.button.callback("Экспорт в JSON", "ce:export")],
     [Markup.button.callback("♻️ Откатить все правки", "ce:reset")],
   ]).reply_markup;
@@ -512,6 +534,27 @@ async function onAdminHelp(ctx) {
 async function onAdminId(ctx) {
   const name = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ");
   await safeReply(ctx, `Твой Telegram ID: ${ctx.from.id}\nИмя: ${name}\nЭто значение для ADMIN_ID.`);
+}
+
+async function onAdminName(ctx) {
+  const raw = String(ctx.message?.text ?? "").replace(/^\/admin_name@?\S*\s*/, "").trim();
+  if (!raw) {
+    await safeReply(
+      ctx,
+      [
+        "Как записать имя именинника:",
+        "",
+        "1) В админке: /admin_edit → 👤 Имя именинника → пришли имя текстом.",
+        "2) Или одной командой: /admin_name Игорь",
+        "",
+        `Сейчас: ${heroName()}`,
+      ].join("\n"),
+    );
+    return;
+  }
+  const name = raw.replace(/\s+/g, " ").slice(0, 40);
+  await persistSetting("heroName", name);
+  await safeReply(ctx, `Готово, именинник — ${name}! Имя сохранено в Redis и сразу подставится в тексты.`);
 }
 
 async function handleAdminCallback(ctx, data) {
@@ -551,6 +594,7 @@ async function onAdminStatus(ctx) {
 
   const lines = [
     `Чат: ${chatId}`,
+    `Именинник: ${heroName()}${config.heroId === null ? " (HERO_ID не задан — отвечать может любой)" : ` (HERO_ID ${config.heroId})`}`,
     `Redis: ${redisOk ? "подключён ✅" : "недоступен ⚠️ (сессия в памяти)"}`,
     `Вопросов в сценарии: ${totalQuestions}`,
     `Правок контента: ${Object.keys(getOverrides()).length}`,
@@ -839,6 +883,28 @@ async function onAdminPendingValue(ctx) {
   await clearPending(ctx.from.id, chatId);
   const value = text.trim();
 
+  if (state.kind === "heroname") {
+    const name = value.replace(/\s+/g, " ").slice(0, 40);
+    if (!name) {
+      await safeReply(ctx, "Имя не понял — пришли его текстом ещё раз.");
+      return;
+    }
+    await persistSetting("heroName", name);
+    await safeReply(
+      ctx,
+      [
+        `Готово, именинник — ${name}! 🎉`,
+        "",
+        "Новое имя сразу подставится в приветствие и финальный текст.",
+        "Уже начатые игры сохранят имя, которое было при запуске.",
+        "",
+        `Приветствие сейчас:\n${fill(content.greeting, { name: heroName(), count: totalQuestions })}`,
+      ].join("\n"),
+      { reply_markup: editMenuKeyboard() },
+    );
+    return;
+  }
+
   if (state.kind === "singleton") {
     await persistOverride(state.key, value);
     const target = SINGLETON_FIELDS[state.field];
@@ -965,6 +1031,21 @@ async function handleContentCallback(ctx, data) {
     return;
   }
 
+  if (action === "heroname") {
+    await safeAnswerCb(ctx);
+    await startPending(ctx, { kind: "heroname" });
+    await safeReply(
+      ctx,
+      [
+        "Пришли имя именинника одним сообщением.",
+        "Оно подставится в приветствие и финальный текст вместо {name}.",
+        "",
+        `Сейчас: ${heroName()}`,
+      ].join("\n"),
+    );
+    return;
+  }
+
   if (action === "list") {
     await safeAnswerCb(ctx);
     await onAdminList(ctx);
@@ -1041,12 +1122,12 @@ const chatId = ctx.chat?.id;
     `ПРЕДПРОСМОТР СЦЕНАРИЯ (${totalQuestions} вопросов)`,
     "",
     `Приветствие:`,
-    fill(content.greeting, { name: config.heroName, count: totalQuestions }),
+    fill(content.greeting, { name: heroName(), count: totalQuestions }),
     "",
     ...questions.map((_, index) => questionBlock(index)),
     "",
     `Финал:`,
-    fill(content.final_text, { name: config.heroName, count: totalQuestions }),
+    fill(content.final_text, { name: heroName(), count: totalQuestions }),
   ];
 
   await safeReply(ctx, "Отправляю сценарий текстом…");
@@ -1458,7 +1539,7 @@ async function saveDraftQuiz(ctx, draft) {
       `Код: ${quiz.code}`,
       "",
       "Как запустить: открой группу с ботом и отправь этот код сообщением.",
-      `Отвечать будет тот, кто отправил код, или именинник (${config.heroName}). Ответы увидят все.`,
+      `Отвечать будет тот, кто отправил код, или именинник (${heroName()}). Ответы увидят все.`,
       "",
       `Вопросов: ${quiz.questions.length}. Все тесты: /mylist`,
     ].join("\n"),

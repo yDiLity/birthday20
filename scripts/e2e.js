@@ -288,14 +288,31 @@ reset();
 await pressAs(3, "ce:qtext");
 expect("гость не попадает в редактор", !texts().some((m) => m.buttons?.includes("q1 · ")), texts().map((m) => m.text).join(" | "));
 
+console.log("\n=== Редактор контента: имя именинника ===");
+reset();
+await pressAs(ADMIN, "ce:heroname");
+expect("бот просит имя именинника", texts().some((m) => m.text.includes("имя именинника")), texts().map((m) => m.text).join(" | ").slice(0, 200));
+
+reset();
+await message(ADMIN, "Игорь");
+expect("имя именинника сохранено", texts().some((m) => m.text.includes("Игорь")), texts().map((m) => m.text).join(" | ").slice(0, 200));
+
+reset();
+await pressAs(ADMIN, "adm:status");
+expect("статус показывает именинника", texts().some((m) => m.text.includes("Именинник: Игорь")), texts().map((m) => m.text).join(" | ").slice(0, 200));
+
+reset();
+await pressAs(ADMIN, "adm:preview");
+expect("превью подставляет имя из настроек", texts().some((m) => m.text.includes("Игорь")), texts().map((m) => m.text).join(" | ").slice(0, 200));
+
 console.log("\n=== Редактор контента: одиночные поля ===");
 reset();
 await pressAs(ADMIN, "ce:greeting");
 expect("бот ждёт новое приветствие", texts().some((m) => m.text.includes("Пришли новое приветствие")), texts().map((m) => m.text).join(" | ").slice(0, 200));
 
 reset();
-await message(ADMIN, "Салют, {name}! Поехали 🎉");
-expect("приветствие сохранено по кнопкам", (await currentGreeting()) === "Салют, {name}! Поехали 🎉", await currentGreeting());
+await message(ADMIN, "Привет, {name}! Начинаем 🎬");
+expect("приветствие сохранено", (await currentGreeting()) === "Привет, {name}! Начинаем 🎬", await currentGreeting());
 
 reset();
 await pressAs(ADMIN, "ce:finalvideo");

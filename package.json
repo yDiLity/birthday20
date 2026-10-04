@@ -1,0 +1,26 @@
+{
+  "name": "prazdnichnaya-svoya-igra-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel deploy --prod",
+    "webhook": "node scripts/webhook.js set",
+    "webhook:info": "node scripts/webhook.js info",
+    "webhook:delete": "node scripts/webhook.js delete",
+    "bot:info": "node scripts/webhook.js me",
+    "test": "node scripts/smoke.js && node scripts/e2e.js && node scripts/api-check.js",
+    "preview": "node scripts/smoke.js --preview"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.34.0",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "vercel": "^34.0.0"
+  }
+}

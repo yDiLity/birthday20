@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/telegram.js": {
+      "includeFiles": "content/questions.json"
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/warm",
+      "schedule": "0 6 * * *"
+    }
+  ]
+}
